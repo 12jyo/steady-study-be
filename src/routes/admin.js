@@ -9,7 +9,9 @@ import {
   listStudentsByBatch,
   listAllStudents,
   resetStudentPassword,
-  assignBatchesToStudent
+  assignBatchesToStudent,
+  deleteBatchAndStudents,
+  deleteResource
 } from "../controllers/adminController.js";
 
 const router = express.Router();
@@ -39,5 +41,9 @@ router.put("/reset-password", authAdmin, resetStudentPassword);
 router.put("/set-student-device-limit", authAdmin, setStudentDeviceLimit);
 
 router.put("/assign-batches", authAdmin, assignBatchesToStudent);
+
+router.delete("/delete-batch", authAdmin, deleteBatchAndStudents);
+
+router.delete("/delete-resource", authAdmin, deleteResource);
 
 export default router;

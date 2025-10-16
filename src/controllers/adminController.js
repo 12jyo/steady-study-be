@@ -12,6 +12,7 @@ import BRM from "../models/BatchResourceMapping.js";
 import StudentBatchMapping from "../models/StudentBatchMapping.js";
 import crypto from "crypto";
 import { Parser } from "json2csv";
+import { deleteFileFromS3 } from "../utils/s3.js"; 
 
 export const generatePassword = () => crypto.randomBytes(4).toString("hex");
 
@@ -248,4 +249,53 @@ export const assignBatchesToStudent = asyncHandler(async (req, res) => {
   await Student.findByIdAndUpdate(studentId, { batchIds }, { new: true });
 
   res.json({ message: "Batches assigned successfully", batchIds });
+});
+
+export const deleteBatchAndStudents = asyncHandler(async (req, res) => {
+  const { batchId } = req.body;
+
+  if (!batchId || !batchId.match(/^[0-9a-fA-F]{24}$/)) {
+    return res.status(400).json({ message: "Invalid batchId" });
+  }
+
+  // Find all student-batch mappings for this batch
+  const mappings = await StudentBatchMapping.find({ batchId });
+  const studentIds = mappings.map(m => m.studentId);
+
+  // Delete students in this batch
+  await Student.deleteMany({ _id: { $in: studentIds } });
+
+  // Delete batch
+  await Batch.findByIdAndDelete(batchId);
+
+  // Delete mappings
+  await StudentBatchMapping.deleteMany({ batchId });
+
+  res.json({ message: "Batch and its students deleted successfully" });
+});
+
+export const deleteResource = asyncHandler(async (req, res) => {
+  const { resourceId } = req.body;
+
+  if (!resourceId || !resourceId.match(/^[0-9a-fA-F]{24}$/)) {
+    return res.status(400).json({ message: "Invalid resourceId" });
+  }
+
+  // Remove the resource from the database
+  const resource = await Resource.findByIdAndDelete(resourceId);
+  if (!resource) {
+    return res.status(404).json({ message: "Resource not found" });
+  }
+
+  // Delete the file from S3 if s3Key exists
+  if (resource.s3Key) {
+    try {
+      await deleteFileFromS3(resource.s3Key);
+    } catch (err) {
+      // Log error but continue
+      console.error("Failed to delete file from S3:", err);
+    }
+  }
+
+  res.json({ message: "Resource deleted successfully" });
 });
