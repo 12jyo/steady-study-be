@@ -6,6 +6,8 @@ import Student from "../models/Student.js";
 import BRM from "../models/BatchResourceMapping.js";
 import Resource from "../models/Resource.js";
 import StudentBatchMapping from "../models/StudentBatchMapping.js";
+import axios from 'axios';
+import mime from "mime-types";
 
 // -------- AUTH ----------
 export const studentLogin = asyncHandler(async (req, res) => {
@@ -112,19 +114,10 @@ export const getResourceSigned = asyncHandler(async (req, res) => {
 
 export const getResourceFile = async (req, res) => {
   const { id } = req.params;
-  const studentId = req.studentId;
 
   try {
     const resource = await Resource.findById(id);
     if (!resource) return res.status(404).json({ message: "Resource not found" });
-
-    const mappings = await BRM.find({ resId: id });
-    const batchIds = mappings.map((m) => m.batchId);
-    const hasAccess = await StudentBatchMapping.exists({
-      studentId,
-      batchId: { $in: batchIds },
-    });
-    if (!hasAccess) return res.status(403).json({ message: "Access denied" });
 
     // Only allow PDF preview
     if (!resource.title.toLowerCase().endsWith(".pdf")) {
