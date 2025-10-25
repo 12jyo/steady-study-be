@@ -40,9 +40,10 @@ export const studentLogin = asyncHandler(async (req, res) => {
 
 // -------- LOGOUT ----------
 export const studentLogout = asyncHandler(async (req, res) => {
+  const { deviceId } = req.body;
   const student = await Student.findById(req.studentId);
-  if (student && req.deviceId) {
-    student.activeDevices = student.activeDevices.filter((d) => d !== req.deviceId);
+  if (student && deviceId) {
+    student.activeDevices = student.activeDevices.filter((d) => d !== deviceId);
     await student.save();
   }
   res.json({ message: "Logged out" });
