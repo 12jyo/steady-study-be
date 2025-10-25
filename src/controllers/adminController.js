@@ -12,7 +12,7 @@ import BRM from "../models/BatchResourceMapping.js";
 import StudentBatchMapping from "../models/StudentBatchMapping.js";
 import crypto from "crypto";
 import { Parser } from "json2csv";
-import { deleteFileFromS3 } from "../utils/s3.js"; 
+import { deleteFileFromS3 } from "../utils/s3.js";
 
 export const generatePassword = () => crypto.randomBytes(4).toString("hex");
 
@@ -258,20 +258,32 @@ export const deleteBatchAndStudents = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: "Invalid batchId" });
   }
 
-  // Find all student-batch mappings for this batch
   const mappings = await StudentBatchMapping.find({ batchId });
   const studentIds = mappings.map(m => m.studentId);
 
-  // Delete students in this batch
   await Student.deleteMany({ _id: { $in: studentIds } });
 
-  // Delete batch
+  const batchResourceMappings = await BRM.find({ batchId });
+  const resourceIds = batchResourceMappings.map(m => m.resId);
+
+  const resources = await Resource.find({ _id: { $in: resourceIds } });
+  for (const resource of resources) {
+    if (resource.s3Key) {
+      try {
+        await deleteFileFromS3(resource.s3Key);
+      } catch (err) {
+        console.error(`Failed to delete S3 file for resource ${resource._id}:`, err);
+      }
+    }
+    await resource.deleteOne();
+  }
+
   await Batch.findByIdAndDelete(batchId);
 
-  // Delete mappings
   await StudentBatchMapping.deleteMany({ batchId });
+  await BRM.deleteMany({ batchId });
 
-  res.json({ message: "Batch and its students deleted successfully" });
+  res.json({ message: "Batch, its students, and resources deleted successfully" });
 });
 
 export const deleteResource = asyncHandler(async (req, res) => {
