@@ -5,6 +5,7 @@ import {
   changePassword,
   listMyResources, getResourceSigned,
   getResourceFile,
+  resetPasswordForStudent,
 } from "../controllers/studentController.js";
 
 const router = express.Router();
@@ -13,6 +14,8 @@ router.post("/login", studentLogin);
 router.post("/logout", authStudent, studentLogout);
 
 router.put("/change-password", authStudent, changePassword);
+
+router.put("/reset-password", authStudent, resetPasswordForStudent);
 
 router.get("/resources", authStudent, listMyResources);
 router.get("/resource-encrypted/:resource_id", authStudent, getResourceSigned);

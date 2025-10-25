@@ -8,8 +8,8 @@ import Resource from "../models/Resource.js";
 import StudentBatchMapping from "../models/StudentBatchMapping.js";
 import axios from 'axios';
 import mime from "mime-types";
+import { Parser } from "json2csv";
 
-// -------- AUTH ----------
 export const studentLogin = asyncHandler(async (req, res) => {
   const { email, password, deviceId } = req.body;
   if (!deviceId) return res.status(400).json({ message: "deviceId is required" });
@@ -20,13 +20,15 @@ export const studentLogin = asyncHandler(async (req, res) => {
   const ok = await verifyPassword(password, student.passwordHash);
   if (!ok) return res.status(401).json({ message: "Invalid credentials" });
 
-  const isKnown = student.activeDevices.includes(deviceId);
-  if (!isKnown && student.activeDevices.length >= student.deviceLimit) {
-    return res.status(403).json({ message: "Device limit reached" });
-  }
-  if (!isKnown) {
-    student.activeDevices.push(deviceId);
-    await student.save();
+  if (deviceId) {
+    const isKnown = student.activeDevices.includes(deviceId);
+    if (!isKnown && student.activeDevices.length >= student.deviceLimit) {
+      return res.status(403).json({ message: "Device limit reached" });
+    }
+    if (!isKnown) {
+      student.activeDevices.push(deviceId);
+      await student.save();
+    }
   }
 
   const token = jwt.sign(
@@ -35,10 +37,9 @@ export const studentLogin = asyncHandler(async (req, res) => {
     { expiresIn: "8h" }
   );
 
-  res.json({ token });
+  res.json({ token, name: student.name });
 });
 
-// -------- LOGOUT ----------
 export const studentLogout = asyncHandler(async (req, res) => {
   const { deviceId } = req.body;
   const student = await Student.findById(req.studentId);
@@ -49,7 +50,6 @@ export const studentLogout = asyncHandler(async (req, res) => {
   res.json({ message: "Logged out" });
 });
 
-// -------- PASSWORD ----------
 export const changePassword = asyncHandler(async (req, res) => {
   const { oldPassword, newPassword } = req.body;
   const student = await Student.findById(req.studentId);
@@ -64,7 +64,6 @@ export const changePassword = asyncHandler(async (req, res) => {
   res.json({ message: "Password changed successfully" });
 });
 
-// -------- RESOURCES ----------
 export const listMyResources = asyncHandler(async (req, res) => {
   const student = await Student.findById(req.studentId).select("batchIds");
   if (!student || !student.batchIds?.length) return res.json([]);
@@ -93,7 +92,6 @@ export const listMyResources = asyncHandler(async (req, res) => {
 export const getResourceSigned = asyncHandler(async (req, res) => {
   const { resource_id } = req.params;
 
-  // Verify that student is allowed to access this resource
   const mappings = await BRM.find({ resId: resource_id }).lean();
   const allowedBatchIds = mappings.map((m) => m.batchId.toString());
 
@@ -120,17 +118,14 @@ export const getResourceFile = async (req, res) => {
     const resource = await Resource.findById(id);
     if (!resource) return res.status(404).json({ message: "Resource not found" });
 
-    // Only allow PDF preview
     if (!resource.title.toLowerCase().endsWith(".pdf")) {
       return res
         .status(403)
         .json({ message: "Preview not allowed for this file type" });
     }
 
-    // Get signed S3 URL
     const url = await getSignedReadUrl(resource.s3Key, 300);
 
-    // Stream directly to frontend
     const s3Stream = await axios.get(url, { responseType: "stream" });
 
     const mimeType = mime.lookup(resource.title) || "application/pdf";
@@ -144,3 +139,28 @@ export const getResourceFile = async (req, res) => {
     res.status(500).json({ message: "Failed to stream file" });
   }
 };
+
+export const resetPasswordForStudent = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ message: "Email is required" });
+
+  const student = await Student.findOne({ _id: req.studentId, email });
+  if (!student) return res.status(404).json({ message: "Student not found" });
+
+  const newPassword = Math.random().toString(36).slice(-8);
+  student.passwordHash = await hashPassword(newPassword);
+  await student.save();
+
+  const fields = ["name", "email", "newPassword"];
+  const data = [{
+    name: student.name || "",
+    email: student.email,
+    newPassword
+  }];
+  const parser = new Parser({ fields });
+  const csv = parser.parse(data);
+
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename=student-password-reset-${student._id}.csv`);
+  res.send(csv);
+});
