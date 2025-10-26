@@ -20,15 +20,16 @@ export const studentLogin = asyncHandler(async (req, res) => {
   const ok = await verifyPassword(password, student.passwordHash);
   if (!ok) return res.status(401).json({ message: "Invalid credentials" });
 
-  if (deviceId) {
-    const isKnown = student.activeDevices.includes(deviceId);
-    if (!isKnown && student.activeDevices.length >= student.deviceLimit) {
-      return res.status(403).json({ message: "Device limit reached" });
+  let devices = student.activeDevices || [];
+  const deviceIndex = devices.indexOf(deviceId);
+
+  if (deviceIndex === -1) {
+    if (devices.length >= student.deviceLimit) {
+      devices.shift();
     }
-    if (!isKnown) {
-      student.activeDevices.push(deviceId);
-      await student.save();
-    }
+    devices.push(deviceId);
+    student.activeDevices = devices;
+    await student.save();
   }
 
   const token = jwt.sign(
@@ -37,7 +38,7 @@ export const studentLogin = asyncHandler(async (req, res) => {
     { expiresIn: "8h" }
   );
 
-  res.json({ token, name: student.name });
+  res.json({ token, name: student.name, studentId: student._id });
 });
 
 export const studentLogout = asyncHandler(async (req, res) => {
