@@ -41,7 +41,7 @@ export const enrollStudent = asyncHandler(async (req, res) => {
 
   const { name, email } = value;
   const exists = await Student.findOne({ email });
-  if (exists) return res.status(409).json({ message: "Student already exists" });
+  if (exists) return res.status(409).json({ message: "Email already exists" });
 
   const password = generatePassword();
   const passwordHash = await hashPassword(password);
