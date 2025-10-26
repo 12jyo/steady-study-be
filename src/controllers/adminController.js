@@ -3,7 +3,6 @@ import Joi from "joi";
 import jwt from "jsonwebtoken";
 import { hashPassword } from "../utils/passwords.js";
 import { uploadBufferToS3 } from "../utils/s3.js";
-
 import Admin from "../models/Admin.js";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
@@ -16,7 +15,6 @@ import { deleteFileFromS3 } from "../utils/s3.js";
 
 export const generatePassword = () => crypto.randomBytes(4).toString("hex");
 
-// ---------- AUTH ----------
 export const adminLogin = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   const admin = await Admin.findOne({ email });
@@ -33,9 +31,6 @@ export const adminLogout = asyncHandler(async (_req, res) => {
   res.json({ message: "Logged out" });
 });
 
-// ---------- STUDENTS ----------
-
-// ENROLL STUDENT (default device access = 2)
 export const enrollStudent = asyncHandler(async (req, res) => {
   const schema = Joi.object({
     name: Joi.string().required(),
@@ -67,7 +62,6 @@ export const enrollStudent = asyncHandler(async (req, res) => {
   });
 });
 
-// ADMIN SET NEW PASSWORD
 export const setStudentPassword = asyncHandler(async (req, res) => {
   const schema = Joi.object({
     studentId: Joi.string().required(),
@@ -83,7 +77,6 @@ export const setStudentPassword = asyncHandler(async (req, res) => {
   res.json({ message: "Password updated successfully" });
 });
 
-// ADD STUDENT TO BATCH
 export const addStudentToBatch = asyncHandler(async (req, res) => {
   const schema = Joi.object({
     batchId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).required(),
@@ -106,7 +99,6 @@ export const addStudentToBatch = asyncHandler(async (req, res) => {
   res.json({ message: "Student added to batch successfully" });
 });
 
-// SET / EDIT DEVICE LIMIT (validate 1–5)
 export const setStudentDeviceLimit = asyncHandler(async (req, res) => {
   const schema = Joi.object({
     studentId: Joi.string().required(),
@@ -126,7 +118,6 @@ export const setStudentDeviceLimit = asyncHandler(async (req, res) => {
   res.json({ message: `Device limit updated to ${deviceLimit}` });
 });
 
-// ---------- BATCHES ----------
 export const createBatch = asyncHandler(async (req, res) => {
   const { title } = req.body;
   if (!title) return res.status(400).json({ message: "Batch title is required" });
@@ -143,13 +134,11 @@ export const listBatches = asyncHandler(async (_req, res) => {
 export const listStudentsByBatch = asyncHandler(async (req, res) => {
   const { batch_id } = req.query;
 
-  // If no batch_id, return all students
   if (!batch_id) {
     const allStudents = await Student.find().select("_id email deviceLimit activeDevices");
     return res.json(allStudents);
   }
 
-  // If batch_id is provided, return only that batch's students
   const mappings = await StudentBatchMapping.find({ batchId: batch_id });
   const ids = mappings.map((m) => m.studentId);
   const students = await Student.find({ _id: { $in: ids } })
@@ -222,7 +211,6 @@ export const resetStudentPassword = asyncHandler(async (req, res) => {
   const passwordHash = await hashPassword(newPassword);
   await Student.findByIdAndUpdate(studentId, { passwordHash });
 
-  // Generate CSV to download
   const parser = new Parser({ fields: ["name", "email", "password"] });
   const csv = parser.parse([{ name: student.name, email: student.email, password: newPassword }]);
 
@@ -245,7 +233,6 @@ export const assignBatchesToStudent = asyncHandler(async (req, res) => {
   const student = await Student.findById(studentId);
   if (!student) return res.status(404).json({ message: "Student not found" });
 
-  // Update directly to avoid triggering full validation
   await Student.findByIdAndUpdate(studentId, { batchIds }, { new: true });
 
   res.json({ message: "Batches assigned successfully", batchIds });
@@ -258,32 +245,40 @@ export const deleteBatchAndStudents = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: "Invalid batchId" });
   }
 
-  const mappings = await StudentBatchMapping.find({ batchId });
-  const studentIds = mappings.map(m => m.studentId);
+  await StudentBatchMapping.deleteMany({ batchId });
 
-  await Student.deleteMany({ _id: { $in: studentIds } });
+  await Student.updateMany(
+    { batchIds: batchId },
+    { $pull: { batchIds: batchId } }
+  );
 
   const batchResourceMappings = await BRM.find({ batchId });
   const resourceIds = batchResourceMappings.map(m => m.resId);
 
+  await Resource.updateMany(
+    { _id: { $in: resourceIds } },
+    { $pull: { batchIds: batchId } }
+  );
+
   const resources = await Resource.find({ _id: { $in: resourceIds } });
   for (const resource of resources) {
-    if (resource.s3Key) {
-      try {
-        await deleteFileFromS3(resource.s3Key);
-      } catch (err) {
-        console.error(`Failed to delete S3 file for resource ${resource._id}:`, err);
+    if (!resource.batchIds || resource.batchIds.length === 0) {
+      if (resource.s3Key) {
+        try {
+          await deleteFileFromS3(resource.s3Key);
+        } catch (err) {
+          console.error(`Failed to delete S3 file for resource ${resource._id}:`, err);
+        }
       }
+      await resource.deleteOne();
     }
-    await resource.deleteOne();
   }
+
+  await BRM.deleteMany({ batchId });
 
   await Batch.findByIdAndDelete(batchId);
 
-  await StudentBatchMapping.deleteMany({ batchId });
-  await BRM.deleteMany({ batchId });
-
-  res.json({ message: "Batch, its students, and resources deleted successfully" });
+  res.json({ message: "Batch deleted, students and resources unlinked, resources deleted from S3 if not mapped to any batch." });
 });
 
 export const deleteResource = asyncHandler(async (req, res) => {
@@ -293,18 +288,15 @@ export const deleteResource = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: "Invalid resourceId" });
   }
 
-  // Remove the resource from the database
   const resource = await Resource.findByIdAndDelete(resourceId);
   if (!resource) {
     return res.status(404).json({ message: "Resource not found" });
   }
 
-  // Delete the file from S3 if s3Key exists
   if (resource.s3Key) {
     try {
       await deleteFileFromS3(resource.s3Key);
     } catch (err) {
-      // Log error but continue
       console.error("Failed to delete file from S3:", err);
     }
   }
