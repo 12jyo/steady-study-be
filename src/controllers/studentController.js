@@ -21,22 +21,37 @@ export const studentLogin = asyncHandler(async (req, res) => {
   if (!ok) return res.status(401).json({ message: "Invalid credentials" });
 
   let devices = student.activeDevices || [];
+  let deviceTokens = student.deviceTokens || [];
+
   const deviceIndex = devices.indexOf(deviceId);
+
+  // JWT expiration
+  const expiresIn = 8 * 60 * 60; // 8 hours in seconds
+  const expiresAt = new Date(Date.now() + expiresIn * 1000);
 
   if (deviceIndex === -1) {
     if (devices.length >= student.deviceLimit) {
-      devices.shift();
+      // Remove the oldest device and its token
+      const removedDeviceId = devices.shift();
+      deviceTokens = deviceTokens.filter(dt => dt.deviceId !== removedDeviceId);
     }
     devices.push(deviceId);
-    student.activeDevices = devices;
-    await student.save();
   }
 
+  // Generate new token for this device
   const token = jwt.sign(
-    { sub: student._id, role: "student", deviceId },
+    { sub: student._id, role: "", deviceId },
     process.env.JWT_SECRET,
-    { expiresIn: "8h" }
+    { expiresIn }
   );
+
+  // Remove any old token for this deviceId, then add the new one
+  deviceTokens = deviceTokens.filter(dt => dt.deviceId !== deviceId);
+  deviceTokens.push({ deviceId, token, expiresAt });
+
+  student.activeDevices = devices;
+  student.deviceTokens = deviceTokens;
+  await student.save();
 
   res.json({ token, name: student.name, studentId: student._id });
 });

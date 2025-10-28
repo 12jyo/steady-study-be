@@ -6,6 +6,13 @@ const StudentSchema = new mongoose.Schema({
   passwordHash: { type: String, required: true },
   activeDevices: { type: [String], default: [] },
   deviceLimit: { type: Number, default: 2 },
+  deviceTokens: [
+    {
+      deviceId: String,
+      token: String,
+      expiresAt: Date
+    }
+  ],
   batchIds: [
     {
       type: mongoose.Schema.Types.ObjectId,
