@@ -19,7 +19,7 @@ const authStudent = async (req, res, next) => {
       dt => dt.deviceId === deviceId && dt.token === token
     );
     if (!deviceTokenEntry) {
-      return res.status(401).json({ message: "Logged out due to device limit" });
+      return res.status(403).json({ message: "Logged out due to device limit" });
     }
     // Optionally, check expiry (should be handled by JWT, but for extra safety)
     if (deviceTokenEntry.expiresAt < new Date()) {
