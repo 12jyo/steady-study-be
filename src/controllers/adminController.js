@@ -36,12 +36,18 @@ export const enrollStudent = asyncHandler(async (req, res) => {
     name: Joi.string().required(),
     email: Joi.string().email().required(),
   });
+
   const { error, value } = schema.validate(req.body);
-  if (error) return res.status(400).json({ message: error.details[0].message });
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message });
+  }
 
   const { name, email } = value;
+
   const exists = await Student.findOne({ email });
-  if (exists) return res.status(409).json({ message: "Email already exists" });
+  if (exists) {
+    return res.status(409).json({ message: "Email already exists" });
+  }
 
   const password = generatePassword();
   const passwordHash = await hashPassword(password);
@@ -53,13 +59,16 @@ export const enrollStudent = asyncHandler(async (req, res) => {
     deviceLimit: 2,
   });
 
-  res.status(201).json({
-    id: student._id,
-    name: student.name,
-    email: student.email,
-    password,
-    message: "Student enrolled successfully",
-  });
+  const parser = new Parser({ fields: ["name", "email", "password"] });
+  const csv = parser.parse([{ name: student.name, email: student.email, password }]);
+
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${student.email}-credentials.csv"`
+  );
+
+  return res.status(200).send(csv);
 });
 
 export const setStudentPassword = asyncHandler(async (req, res) => {
